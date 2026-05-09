@@ -2,7 +2,26 @@ import pandas as pd
 import streamlit as st
 from collections import Counter, defaultdict
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="MAYA AI SUPER VIP")
+
+# --- Custom CSS for Compact View ---
+st.markdown("""
+    <style>
+    .stTable { font-size: 12px !important; }
+    .compact-grid {
+        display: grid; 
+        grid-template-columns: repeat(5, 1fr); 
+        gap: 2px; 
+    }
+    .compact-item {
+        font-size: 12px;
+        padding: 2px;
+        text-align: center;
+        border: 1px solid #ccc;
+        border-radius: 2px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 def get_val_str(val):
     if pd.isna(val): return ""
@@ -12,7 +31,6 @@ def get_val_str(val):
 def apply_32_patterns(val_str):
     if not val_str or len(val_str) != 2: return set()
     A, B = int(val_str[0]), int(val_str[1])
-    # 32 Patterns Logic
     PAT = [(0,1),(0,-1),(1,0),(-1,0),(0,5),(0,-5),(5,0),(-5,0),(1,4),(-1,-4),(4,1),(-4,-1),(1,6),(-1,-6),(6,1),(-6,-1),(1,1),(-1,-1),(1,-1),(-1,1),(5,5),(-5,-5),(5,-5),(-5,5),(1,5),(-1,-5),(1,-5),(-1,5),(5,1),(-5,-1),(5,-1),(-5,1)]
     res = set()
     for da, db in PAT:
@@ -20,79 +38,95 @@ def apply_32_patterns(val_str):
         if 0 <= na <= 9 and 0 <= nb <= 9: res.add(f"{na}{nb}")
     return res
 
-# --- Optimized Lookbacks from 7yr Audit ---
-DS_SELF_DAYS = [6, 5, 8]
-GL_CROSS_DAYS = [3, 1, 4]
+# --- 7yr Optimized Lookbacks ---
+DS_SELF = [6, 5, 8]
+GL_CROSS = [3, 1, 4]
 
-def get_super_vip_logic(df, target_date):
+def get_combined_logic(df, target_date, shift='DS'):
     hist_df = df[df['DATE'] < pd.to_datetime(target_date)]
-    if hist_df.empty: return set(), set(), set()
+    if hist_df.empty: return set(), set()
     
-    # 1. DS Self Pool
-    p_ds = set()
-    for lb in DS_SELF_DAYS:
-        if len(hist_df) >= lb: p_ds.update(apply_32_patterns(hist_df.iloc[-lb]['DS']))
+    p_self = set()
+    for lb in DS_SELF:
+        if len(hist_df) >= lb: p_self.update(apply_32_patterns(hist_df.iloc[-lb]['DS']))
             
-    # 2. GL Cross Pool
-    p_gl = set()
-    for lb in GL_CROSS_DAYS:
-        if len(hist_df) >= lb: p_gl.update(apply_32_patterns(hist_df.iloc[-lb]['GL']))
+    p_cross = set()
+    for lb in GL_CROSS:
+        if len(hist_df) >= lb: p_cross.update(apply_32_patterns(hist_df.iloc[-lb]['GL']))
             
-    common = p_ds.intersection(p_gl)
-    diff_ds = p_ds.difference(p_gl)
-    diff_gl = p_gl.difference(p_ds)
-    
-    return common, diff_ds, diff_gl
+    common = p_self.intersection(p_cross)
+    diff = p_self.symmetric_difference(p_cross) # Dono ka bacha hua data
+    return common, diff
 
 # --- Main Dashboard ---
-uploaded_file = st.file_uploader("Upload 0DSP0 File")
+uploaded_file = st.file_uploader("Upload Excel", type=['xlsx'], label_visibility="collapsed")
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
     df['DATE'] = pd.to_datetime(df['DATE'])
+    df = df.sort_values('DATE').reset_index(drop=True)
     for c in ['DS','FD','GD','GL','DB','SG']: df[c] = df[c].apply(get_val_str)
     
-    t_date = st.date_input("Select Date", df['DATE'].max())
+    t_date = st.date_input("Tareekh Chunein", df['DATE'].max())
     
-    common, d_ds, d_gl = get_super_vip_logic(df, t_date)
+    st.markdown(f"### 📅 {t_date.strftime('%d-%b-%Y')} | {t_date.strftime('%A')}")
+
+    # --- TOP Prediction Display (Compact) ---
+    common, unique = get_combined_logic(df, t_date)
     actual_ds = df[df['DATE'] == pd.to_datetime(t_date)]['DS'].values[0] if not df[df['DATE'] == pd.to_datetime(t_date)].empty else ""
 
-    # Visual Display
-    st.write(f"### 🛡️ Multi-Logic VIP Audit: {t_date.strftime('%d-%b')}")
+    col1, col2 = st.columns([1, 2])
     
-    col1, col2, col3 = st.columns(3)
     with col1:
-        st.success(f"⭐ COMMON (SUPER VIP): {len(common)} Ank")
-        st.write(sorted(list(common)))
-        if actual_ds in common: st.markdown("🎯 **HIT IN COMMON!**")
-        
-    with col2:
-        st.info(f"💎 DS-ONLY: {len(d_ds)} Ank")
-        st.write(sorted(list(d_ds)))
-        if actual_ds in d_ds: st.markdown("🎯 **HIT IN DS-ONLY!**")
-        
-    with col3:
-        st.warning(f"🎯 GL-CROSS: {len(d_gl)} Ank")
-        st.write(sorted(list(d_gl)))
-        if actual_ds in d_gl: st.markdown("🎯 **HIT IN GL-CROSS!**")
+        st.markdown("<div style='background:gold; color:black; text-align:center; font-weight:bold;'>⭐ SUPER VIP (Common)</div>", unsafe_allow_html=True)
+        html = "<div class='compact-grid'>"
+        for n in sorted(list(common)):
+            bg = "#28a745" if n == actual_ds else "#f0f2f6"
+            html += f"<div class='compact-item' style='background:{bg};'>{n}</div>"
+        html += "</div>"
+        st.markdown(html, unsafe_allow_html=True)
 
-    # --- THE KILLER BACKTEST ENGINE ---
-    st.divider()
-    st.subheader("📊 15-Day Winning Logic Tracker")
-    st.write("Ye table bataegi ki pichle 15 dino mein kaun sa logic sabse zyada pass hua hai.")
+    with col2:
+        st.markdown("<div style='background:#007bff; color:white; text-align:center; font-weight:bold;'>💎 Support (Unique)</div>", unsafe_allow_html=True)
+        html = "<div class='compact-grid' style='grid-template-columns: repeat(10, 1fr);'>"
+        for n in sorted(list(unique)):
+            bg = "#28a745" if n == actual_ds else "#f0f2f6"
+            html += f"<div class='compact-item' style='background:{bg};'>{n}</div>"
+        html += "</div>"
+        st.markdown(html, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # --- 11-Day History (Pehle Jaisa Format) ---
+    st.subheader("📜 11-Day History (Audit)")
+    hist_view = df[df['DATE'] <= pd.to_datetime(t_date)].tail(11).copy().sort_values('DATE', ascending=False)
     
-    audit_results = []
-    test_range = df[df['DATE'] <= pd.to_datetime(t_date)].tail(15)
-    
-    for idx, row in test_range.iterrows():
-        c, ds, gl = get_super_vip_logic(df, row['DATE'])
-        res = row['DS']
-        winner = "❌ FAIL"
-        if res in c: winner = "⭐ COMMON (SUPER VIP)"
-        elif res in ds: winner = "💎 DS-ONLY"
-        elif res in gl: winner = "🎯 GL-CROSS"
+    audit_data = []
+    for idx, row in hist_view.iterrows():
+        # Aaj ke date ke liye predictions nikalna
+        c_ank, u_ank = get_combined_logic(df, row['DATE'])
+        val = row['DS']
         
-        audit_results.append({"Date": row['DATE'].date(), "Day": row['DATE'].strftime('%A'), "Result": res, "Winner": winner})
+        status = val # Default
+        if val in c_ank: status = f"⭐ {val} (Common)"
+        elif val in u_ank: status = f"🟢 {val} (Support)"
+        
+        audit_data.append({
+            "Tarikh": row['DATE'].strftime('%d-%m'),
+            "Bar (Day)": row['DATE'].strftime('%A'),
+            "Disawar Result": status,
+            "Faridabad": row['FD'],
+            "Gaziabad": row['GD'],
+            "Gali": row['GL'],
+            "Delhi Bajar": row['DB'],
+            "Shri Ganesh": row['SG']
+        })
     
-    st.table(pd.DataFrame(audit_results))
+    st.table(pd.DataFrame(audit_data))
+
+    # Real Metrics
+    if actual_ds != "":
+        if actual_ds in common: st.success("SUCCESS: Aaj ka result SUPER VIP se pass hua!")
+        elif actual_ds in unique: st.info("PASS: Aaj ka result Support se pass hua!")
+        else: st.error("FAIL: Aaj match nahi hua.")
             
