@@ -2,15 +2,16 @@ import pandas as pd
 import streamlit as st
 from collections import Counter, defaultdict
 
-st.set_page_config(layout="wide", page_title="MAYA AI: Super Dashboard")
+st.set_page_config(layout="wide", page_title="MAYA AI: Compact Dashboard")
 
 def get_val_str(val):
     if pd.isna(val): return ""
     v = str(val).replace('.0', '').strip()
     return v.zfill(2)[-2:] if v.isdigit() else ""
 
-# --- Core Engine Logic ---
+# --- Core Engine ---
 def get_predictions(df, target_date, shift_name):
+    # True Blind Test: Target date se pehle ka data
     hist_df = df[df['DATE'] < pd.to_datetime(target_date)].copy()
     if hist_df.empty: return []
 
@@ -18,24 +19,20 @@ def get_predictions(df, target_date, shift_name):
     curr_weekday = pd.to_datetime(target_date).weekday()
     curr_day_num = pd.to_datetime(target_date).day
 
-    # 1. Bar-wise (Pichle 15 hafte ka same day)
+    # Logic: Bar + Date + T1/T2/T3
     bw = hist_df[hist_df['DATE'].dt.weekday == curr_weekday][shift_name].tail(15)
     for v in bw: scores[v] += 2.5
-    
-    # 2. Date-wise (Pichle 6 mahino ki same date)
     dw = hist_df[hist_df['DATE'].dt.day == curr_day_num][shift_name].tail(6)
     for v in dw: scores[v] += 2.0
-
-    # 3. T1/T2/T3 Triple History Integration
-    for i, weight in zip([1, 2, 3], [1.5, 1.2, 1.0]):
+    for i, w in zip([1, 2, 3], [1.5, 1.2, 1.0]):
         if len(hist_df) >= i:
             val = hist_df.iloc[-i][shift_name]
-            if val: scores[val] += weight
+            if val: scores[val] += w
 
     return [n for n, s in sorted(scores.items(), key=lambda x: -x[1])[:30]]
 
 # --- UI Layout ---
-st.title("🎯 Maya AI: All-Shift Prediction Dashboard")
+st.title("🎯 Maya AI: Smart Compact Dashboard")
 uploaded_file = st.file_uploader("Excel File Upload Karein", type=['xlsx'])
 
 if uploaded_file:
@@ -47,60 +44,56 @@ if uploaded_file:
     for c in cols: df[c] = df[c].apply(get_val_str)
 
     target_date = st.date_input("Tareekh Chunein", df['DATE'].max())
-    
-    # --- Sabhi Shifton Ka Prediction Ek Saath ---
-    st.subheader(f"📅 Predictions for {target_date.strftime('%d-%m-%Y')} ({target_date.strftime('%A')})")
-    
-    results = {}
-    actual_results = df[df['DATE'] == pd.to_datetime(target_date)]
-    
-    # Display in Columns
+    st.markdown(f"### 📅 {target_date.strftime('%d-%m-%Y')} | {target_date.strftime('%A')}")
+
+    # --- Predictions in Compact Grid ---
+    shift_predictions = {}
     grid = st.columns(6)
+    
+    actual_row = df[df['DATE'] == pd.to_datetime(target_date)]
+    
     for i, shift in enumerate(cols):
         with grid[i]:
-            st.markdown(f"### {shift}")
+            st.markdown(f"<div style='background-color:#007bff; color:white; padding:5px; text-align:center; border-radius:5px; font-weight:bold;'>{shift}</div>", unsafe_allow_html=True)
             preds = get_predictions(df, target_date, shift)
-            actual = actual_results[shift].values[0] if not actual_results.empty else None
+            shift_predictions[shift] = preds
+            actual = actual_row[shift].values[0] if not actual_row.empty else ""
             
-            # Highlight Pass/Fail
+            # 5-5 की लाइन में दिखाने के लिए HTML
+            preds_html = "<div style='display:grid; grid-template-columns: repeat(5, 1fr); gap:2px; margin-top:5px;'>"
             for p in preds:
-                if p == actual:
-                    st.markdown(f"**<span style='color:green; font-size:18px;'>✅ {p}</span>**", unsafe_allow_html=True)
-                else:
-                    st.write(p)
-            results[shift] = preds
+                bg = "#28a745" if p == actual and actual != "" else "#f0f2f6"
+                color = "white" if p == actual else "black"
+                preds_html += f"<div style='background:{bg}; color:{color}; font-size:12px; padding:3px; text-align:center; border-radius:2px; border:1px solid #ddd;'>{p}</div>"
+            preds_html += "</div>"
+            st.markdown(preds_html, unsafe_allow_html=True)
 
     st.divider()
 
-    # --- Triple History Section (Prediction ke Niche) ---
-    st.subheader("📜 Pattern History (T1, T2, T3)")
-    hist_data = df[df['DATE'] < pd.to_datetime(target_date)].tail(3)[['DATE'] + cols]
+    # --- 11-Day History Section (Including Target Date) ---
+    st.subheader("📜 Last 11 Days Full History (Backtest Check)")
     
-    # Ulta karke dikhayenge taaki T1 sabse upar rahe
-    hist_data = hist_data.sort_values('DATE', ascending=False)
+    # Target date tak ka 11 din ka data nikalna
+    history_view = df[df['DATE'] <= pd.to_datetime(target_date)].tail(11).copy()
+    history_view = history_view.sort_values('DATE', ascending=False)
     
-    # Styling for T-labels
-    t_labels = ["T1 (Yesterday)", "T2 (Day Before)", "T3 (3 Days Ago)"]
-    hist_data.insert(0, "Type", t_labels[:len(hist_data)])
-    
-    st.table(hist_data)
+    # Table formatting with Green Highlight
+    def highlight_pass(row):
+        styles = ['' for _ in row]
+        for i, col_name in enumerate(row.index):
+            if col_name in shift_predictions:
+                # Check if the value in this cell was predicted for THIS specific date
+                # Note: This is for visual audit
+                if row[col_name] in shift_predictions[col_name]:
+                    styles[i] = 'background-color: #c3e6cb; color: #155724; font-weight: bold'
+        return styles
 
-    # --- Monthly Accuracy Auditor ---
-    st.divider()
-    if st.button("Run Full Month Backtest Audit"):
-        st.write("Checking last 30 days...")
-        audit_log = []
-        test_range = df[df['DATE'] > (df['DATE'].max() - pd.Timedelta(days=30))]
+    # Display History Table
+    styled_hist = history_view.style.apply(highlight_pass, axis=1)
+    st.table(styled_hist)
+
+    # --- Bottom Stats ---
+    if not actual_row.empty:
+        total_hits = sum([1 for s in cols if actual_row[s].values[0] in shift_predictions[s]])
+        st.metric("Total Shifts Passed Today", f"{total_hits} / 6")
         
-        for idx, row in test_range.iterrows():
-            day_hits = 0
-            for s in cols:
-                p_list = get_predictions(df, row['DATE'], s)
-                if row[s] in p_list and row[s] != "":
-                    day_hits += 1
-            audit_log.append({"Date": row['DATE'].date(), "Pass Shifts": day_hits})
-        
-        audit_df = pd.DataFrame(audit_log)
-        st.line_chart(audit_df.set_index('Date'))
-        st.write(f"Average Daily Pass: **{audit_df['Pass Shifts'].mean():.2f} Shifts**")
-      
